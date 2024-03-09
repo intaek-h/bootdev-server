@@ -1,9 +1,14 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 )
+
+type apiConfig struct {
+	fileserverHits int
+}
 
 func main() {
 	const filePathRoot = "."
@@ -12,9 +17,12 @@ func main() {
 	var mux = http.NewServeMux()
 	var corsMux = middlewareCors(mux)
 	var server = &http.Server{Handler: corsMux, Addr: ":" + port}
+	var cfg = &apiConfig{fileserverHits: 0}
 
-	mux.Handle("/app/*", http.StripPrefix("/app", http.FileServer(http.Dir(filePathRoot))))
-	mux.HandleFunc("/healthz", handlerReadiness)
+	mux.Handle("/app/*", cfg.middlewareMetricsInc(http.StripPrefix("/app", http.FileServer(http.Dir(filePathRoot)))))
+	mux.HandleFunc("GET /api/healthz", handlerReadiness)
+	mux.HandleFunc("GET /api/metrics", cfg.handlerMetrics)
+	mux.HandleFunc("GET /api/reset", cfg.handlerMetricsReset)
 
 	log.Printf("%s 포트에서 서버를 시작합니다.\n", port)
 
@@ -23,22 +31,16 @@ func main() {
 	log.Fatal(err)
 }
 
-func middlewareCors(next http.Handler) http.Handler {
+func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "*")
-		if r.Method == "OPTIONS" {
-			w.WriteHeader(http.StatusOK)
-			return
-		}
+		cfg.fileserverHits++
 		next.ServeHTTP(w, r)
 	})
 }
 
-// server health checker
-func handlerReadiness(w http.ResponseWriter, r *http.Request) {
+func (cfg *apiConfig) handlerMetrics(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Add("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	w.Header().Add("Content-Type", "text/plain; charset=utf-8")
-	w.Write([]byte(http.StatusText(http.StatusOK))) // OK
+	w.Write([]byte(fmt.Sprintf("Hits: %d", cfg.fileserverHits)))
+	// w.Write([]byte(fmt.Sprintf("<html><body><h1>Welcome, Chirpy Admin</h1><p>Chirpy has been visited %d times!</p></body></html>", cfg.fileserverHits)))
 }
