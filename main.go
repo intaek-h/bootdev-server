@@ -6,10 +6,15 @@ import (
 )
 
 func main() {
+	const filePathRoot = "."
 	const port = "8080"
-	var mux = http.ServeMux{}
-	var corsMux = middlewareCors(&mux)
+
+	var mux = http.NewServeMux()
+	var corsMux = middlewareCors(mux)
 	var server = &http.Server{Handler: corsMux, Addr: ":" + port}
+
+	mux.Handle("/app/*", http.StripPrefix("/app", http.FileServer(http.Dir(filePathRoot))))
+	mux.HandleFunc("/healthz", handlerReadiness)
 
 	log.Printf("%s 포트에서 서버를 시작합니다.\n", port)
 
@@ -29,4 +34,11 @@ func middlewareCors(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// server health checker
+func handlerReadiness(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusOK)
+	w.Header().Add("Content-Type", "text/plain; charset=utf-8")
+	w.Write([]byte(http.StatusText(http.StatusOK))) // OK
 }
