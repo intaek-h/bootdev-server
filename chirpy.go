@@ -4,15 +4,15 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"sort"
 	"strings"
+
+	"github.com/intaek-h/bootdev-server/internal/database"
 )
 
-func handlerValidateChirp(w http.ResponseWriter, r *http.Request) {
+func (cfg *apiConfig) handlerPostChirp(w http.ResponseWriter, r *http.Request) {
 	type payload struct {
 		Body string `json:"body"`
-	}
-	type responseBody struct {
-		CleanedBody string `json:"cleaned_body"`
 	}
 
 	decoder := json.NewDecoder(r.Body)
@@ -35,7 +35,64 @@ func handlerValidateChirp(w http.ResponseWriter, r *http.Request) {
 	replacer := strings.NewReplacer(bannedWords...)
 	cleanedBody := replacer.Replace(body.Body)
 
-	respondWithJSON(w, http.StatusOK, responseBody{CleanedBody: cleanedBody})
+	chirp, err := cfg.DB.CreateChirp(cleanedBody)
+	if err != nil {
+		log.Printf("Chirp를 데이터베이스에 저장하는 중에 오류가 발생했습니다: %s\n", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	respondWithJSON(w, http.StatusCreated, chirp)
+}
+
+func (cfg *apiConfig) handlerGetChirps(w http.ResponseWriter, _ *http.Request) {
+	dbChirps, err := cfg.DB.GetChirps()
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Chirps를 가져오는 중에 오류가 발생했습니다.")
+		return
+	}
+
+	chirps := []database.Chirp{}
+	for _, dbChirp := range dbChirps {
+		chirps = append(chirps, database.Chirp{Id: dbChirp.Id, Body: dbChirp.Body})
+	}
+
+	sort.Slice(chirps, func(i, j int) bool {
+		return chirps[i].Id < chirps[j].Id
+	})
+
+	respondWithJSON(w, http.StatusOK, chirps)
+}
+
+func (cfg *apiConfig) handlerGetChirp(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("chirpId")
+	dbChirp, err := cfg.DB.GetChirp(id)
+	if err != nil {
+		respondWithError(w, http.StatusNotFound, "Chirp를 가져오는 중에 오류가 발생했습니다.")
+		return
+	}
+
+	respondWithJSON(w, http.StatusOK, database.Chirp{Id: dbChirp.Id, Body: dbChirp.Body})
+}
+
+func (cfg *apiConfig) handlerCreateUser(w http.ResponseWriter, r *http.Request) {
+	defer r.Body.Close()
+
+	var user database.User
+
+	err := json.NewDecoder(r.Body).Decode(&user)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid request payload")
+		return
+	}
+
+	user, err = cfg.DB.CreateUser(user.Email)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Error creating user")
+		return
+	}
+
+	respondWithJSON(w, http.StatusCreated, user)
 }
 
 // 문자열 변환 다른 로직 예시
