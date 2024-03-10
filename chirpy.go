@@ -78,6 +78,11 @@ func (cfg *apiConfig) handlerGetChirp(w http.ResponseWriter, r *http.Request) {
 func (cfg *apiConfig) handlerCreateUser(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 
+	type responseBody struct {
+		Id    int    `json:"id"`
+		Email string `json:"email"`
+	}
+
 	var user database.User
 
 	err := json.NewDecoder(r.Body).Decode(&user)
@@ -86,13 +91,48 @@ func (cfg *apiConfig) handlerCreateUser(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	user, err = cfg.DB.CreateUser(user.Email)
+	user, err = cfg.DB.CreateUser(user.Email, user.Password)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Error creating user")
 		return
 	}
 
-	respondWithJSON(w, http.StatusCreated, user)
+	respondWithJSON(w, http.StatusCreated, responseBody{Id: user.Id, Email: user.Email})
+}
+
+func (cfg *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request) {
+	defer r.Body.Close()
+
+	type requestBody struct {
+		Email    string
+		Password string
+	}
+
+	type responseBody struct {
+		Id    int    `json:"id"`
+		Email string `json:"email"`
+	}
+
+	var body requestBody
+	err := json.NewDecoder(r.Body).Decode(&body)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid request payload")
+		return
+	}
+
+	user, err := cfg.DB.GetUser(body.Email)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "Invalid credentials")
+		return
+	}
+
+	err = user.ComparePassword(body.Password)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "Invalid credentials")
+		return
+	}
+
+	respondWithJSON(w, http.StatusOK, responseBody{Email: user.Email, Id: user.Id})
 }
 
 // 문자열 변환 다른 로직 예시

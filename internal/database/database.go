@@ -6,6 +6,8 @@ import (
 	"os"
 	"strconv"
 	"sync"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 var ErrNotExist = errors.New("resource does not exist")
@@ -26,8 +28,9 @@ type Chirp struct {
 }
 
 type User struct {
-	Id    int    `json:"id"`
-	Email string `json:"email"`
+	Id       int    `json:"id"`
+	Email    string `json:"email"`
+	Password string `json:"password"`
 }
 
 func NewDB(path string) (*DB, error) {
@@ -146,15 +149,24 @@ func (db *DB) GetChirp(id string) (Chirp, error) {
 	return chirp, nil
 }
 
-func (db *DB) CreateUser(email string) (User, error) {
+func (user *User) ComparePassword(password string) error {
+	return bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(password))
+}
+
+func (db *DB) CreateUser(email string, password string) (User, error) {
 	dbStructure, err := db.loadDB()
 
 	if err != nil {
 		return User{}, err
 	}
 
+	passwordHash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return User{}, err
+	}
+
 	id := len(dbStructure.Users) + 1
-	user := User{Email: email, Id: id}
+	user := User{Email: email, Id: id, Password: string(passwordHash)}
 	dbStructure.Users[id] = user
 
 	err = db.writeDB(&dbStructure)
@@ -163,4 +175,20 @@ func (db *DB) CreateUser(email string) (User, error) {
 	}
 
 	return user, nil
+}
+
+func (db *DB) GetUser(email string) (User, error) {
+	dbStructure, err := db.loadDB()
+
+	if err != nil {
+		return User{}, err
+	}
+
+	for _, user := range dbStructure.Users {
+		if user.Email == email {
+			return user, nil
+		}
+	}
+
+	return User{}, ErrNotExist
 }

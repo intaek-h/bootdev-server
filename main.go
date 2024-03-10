@@ -45,6 +45,7 @@ func main() {
 	mux.HandleFunc("GET /api/chirps", cfg.handlerGetChirps)
 	mux.HandleFunc("GET /api/chirps/{chirpId}", cfg.handlerGetChirp)
 	mux.HandleFunc("POST /api/users", cfg.handlerCreateUser)
+	mux.HandleFunc("POST /api/login", cfg.handlerLogin)
 
 	log.Printf("%s 포트에서 서버를 시작합니다.\n", port)
 
