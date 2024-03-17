@@ -2,11 +2,15 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 
+	"github.com/intaek-h/bootdev-server/internal/auth"
 	"github.com/intaek-h/bootdev-server/internal/database"
 )
 
@@ -104,13 +108,15 @@ func (cfg *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 
 	type requestBody struct {
-		Email    string
-		Password string
+		Email            string `json:"email"`
+		Password         string `json:"password"`
+		ExpiresInSeconds int    `json:"expires_in_seconds"`
 	}
 
 	type responseBody struct {
 		Id    int    `json:"id"`
 		Email string `json:"email"`
+		Token string `json:"token"`
 	}
 
 	var body requestBody
@@ -132,7 +138,73 @@ func (cfg *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	respondWithJSON(w, http.StatusOK, responseBody{Email: user.Email, Id: user.Id})
+	defaultExpiration := int(time.Duration(time.Hour * 24).Seconds()) // 24 hours in seconds (int)
+
+	// if the user specified the expiration time, AND it's less than the default expiration time
+	// then we'll use the user's expiration time
+	if body.ExpiresInSeconds > 0 && body.ExpiresInSeconds < defaultExpiration {
+		defaultExpiration = body.ExpiresInSeconds
+	}
+
+	token, err := auth.MakeJWT(user.Id, cfg.jwtSecret, time.Duration(defaultExpiration)*time.Second)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Couldn't create JWT")
+		return
+	}
+
+	fmt.Println(responseBody{Email: user.Email, Id: user.Id, Token: token})
+
+	respondWithJSON(w, http.StatusOK, responseBody{Email: user.Email, Id: user.Id, Token: token})
+}
+
+func (cfg *apiConfig) handlerUpdateUser(w http.ResponseWriter, r *http.Request) {
+	type parameters struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+	type response struct {
+		Email string `json:"email"`
+		Id    int    `json:"id"`
+	}
+
+	token, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "No token")
+		return
+	}
+
+	subject, err := auth.ValidateJWT(token, cfg.jwtSecret)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "Invalid token")
+		return
+	}
+
+	params := parameters{}
+	err = json.NewDecoder(r.Body).Decode(&params)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid request payload")
+		return
+	}
+
+	hashedPassword, err := auth.HashPassword(params.Password)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Error hashing password")
+		return
+	}
+
+	userIdInt, err := strconv.Atoi(subject)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Could no parse user ID")
+		return
+	}
+
+	user, err := cfg.DB.UpdateUser(userIdInt, params.Email, hashedPassword)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Error updating user")
+		return
+	}
+
+	respondWithJSON(w, http.StatusOK, response{Email: user.Email, Id: user.Id})
 }
 
 // 문자열 변환 다른 로직 예시

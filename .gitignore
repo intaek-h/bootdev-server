@@ -1,2 +1,4 @@
 out
 database.json
+.env
+tmp
