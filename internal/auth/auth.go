@@ -23,11 +23,11 @@ func GetBearerToken(headers http.Header) (string, error) {
 	return splitAuth, nil
 }
 
-func MakeJWT(userID int, tokenSecret string, expiresIn time.Duration) (string, error) {
+func MakeJWT(issuer string, userID int, tokenSecret string, expiresIn time.Duration) (string, error) {
 	signingKey := []byte(tokenSecret)
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.RegisteredClaims{
-		Issuer:    "chirpy",
+		Issuer:    issuer,
 		IssuedAt:  jwt.NewNumericDate(time.Now().UTC()),
 		ExpiresAt: jwt.NewNumericDate(time.Now().UTC().Add(expiresIn)),
 		Subject:   fmt.Sprintf("%d", userID),

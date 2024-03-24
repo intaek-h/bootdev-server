@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"log"
 	"net/http"
 	"sort"
@@ -10,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/intaek-h/bootdev-server/internal/auth"
 	"github.com/intaek-h/bootdev-server/internal/database"
 )
@@ -114,9 +114,10 @@ func (cfg *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type responseBody struct {
-		Id    int    `json:"id"`
-		Email string `json:"email"`
-		Token string `json:"token"`
+		Id           int    `json:"id"`
+		Email        string `json:"email"`
+		Token        string `json:"token"`
+		RefreshToken string `json:"refresh_token"`
 	}
 
 	var body requestBody
@@ -138,23 +139,28 @@ func (cfg *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	defaultExpiration := int(time.Duration(time.Hour * 24).Seconds()) // 24 hours in seconds (int)
+	defaultAccessExpiration := int(time.Duration(time.Hour * 24).Seconds()) // 24 hours in seconds (int)
 
 	// if the user specified the expiration time, AND it's less than the default expiration time
 	// then we'll use the user's expiration time
-	if body.ExpiresInSeconds > 0 && body.ExpiresInSeconds < defaultExpiration {
-		defaultExpiration = body.ExpiresInSeconds
+	if body.ExpiresInSeconds > 0 && body.ExpiresInSeconds < defaultAccessExpiration {
+		defaultAccessExpiration = body.ExpiresInSeconds
 	}
 
-	token, err := auth.MakeJWT(user.Id, cfg.jwtSecret, time.Duration(defaultExpiration)*time.Second)
+	token, err := auth.MakeJWT("chirpy_access", user.Id, cfg.jwtSecret, time.Duration(defaultAccessExpiration)*time.Second)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Couldn't create JWT")
 		return
 	}
 
-	fmt.Println(responseBody{Email: user.Email, Id: user.Id, Token: token})
+	defaultRefreshExpiration := time.Duration(time.Hour * 24 * 60) // 7 days in seconds (int)
+	refreshToken, err := auth.MakeJWT("chirpy_refresh", user.Id, cfg.jwtSecret, defaultRefreshExpiration)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Couldn't create JWT")
+		return
+	}
 
-	respondWithJSON(w, http.StatusOK, responseBody{Email: user.Email, Id: user.Id, Token: token})
+	respondWithJSON(w, http.StatusOK, responseBody{Email: user.Email, Id: user.Id, Token: token, RefreshToken: refreshToken})
 }
 
 func (cfg *apiConfig) handlerUpdateUser(w http.ResponseWriter, r *http.Request) {
@@ -205,6 +211,54 @@ func (cfg *apiConfig) handlerUpdateUser(w http.ResponseWriter, r *http.Request) 
 	}
 
 	respondWithJSON(w, http.StatusOK, response{Email: user.Email, Id: user.Id})
+}
+
+func (cfg *apiConfig) handlerRefreshToken(w http.ResponseWriter, r *http.Request) {
+	token, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "No token")
+		return
+	}
+
+	tokenData, err := jwt.ParseWithClaims(
+		token,
+		&jwt.RegisteredClaims{},
+		func(token *jwt.Token) (interface{}, error) {
+			return []byte(cfg.jwtSecret), nil
+		},
+	)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "Invalid token")
+		return
+	}
+
+	issuer, err := tokenData.Claims.GetIssuer()
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "Error getting issuer")
+		return
+	}
+
+	if issuer != "chirpy_refresh" {
+		respondWithError(w, http.StatusUnauthorized, "Invalid token")
+		return
+	}
+
+	userId, err := tokenData.Claims.GetSubject()
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "Error getting user ID")
+		return
+	}
+
+	jwtTime, err := tokenData.Claims.GetExpirationTime()
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "Error getting expiration time")
+		return
+	}
+	if time.Until(jwtTime.Time) < 0 {
+		respondWithError(w, http.StatusUnauthorized, "Token expired")
+		return
+	}
+
 }
 
 // 문자열 변환 다른 로직 예시
